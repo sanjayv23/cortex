@@ -1,0 +1,35 @@
+# Environment variables & Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# ChromaDB Vector Store Data & Uploaded Documents
+chroma_db/
+docs/*.pdf
+docs/*.txt
+docs/*.md
+!docs/.gitkeep
+
+# Output Reports & Execution Logs
+reports/
+logs/
+*.json
+!requirements.txt
+!package.json
+
+# IDE & System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Agent Research Pipeline | LangGraph & ChromaDB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Marked parser for Markdown -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Navbar Header -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div>
+          <h1 class="brand-title">Agentic Research Studio</h1>
+          <p class="brand-subtitle">LangGraph Multi-Agent Pipeline & ChromaDB</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="db-status-badge" id="dbStatusBadge">
+          <span class="status-dot"></span>
+          <span id="dbCountText">Vector DB: Loading...</span>
+        </div>
+        <button class="btn btn-secondary" onclick="toggleIngestDrawer()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Ingest Knowledge
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Search Topic Control Bar -->
+      <section class="topic-card glass-panel">
+        <div class="topic-input-group">
+          <input type="text" id="topicInput" class="topic-input" placeholder="Enter any research topic (e.g. impact of remote work on urban housing prices)..." value="impact of remote work on urban housing prices">
+          <button id="runBtn" class="btn btn-primary" onclick="runPipeline()">
+            <span id="runBtnText">Run Research Pipeline</span>
+            <svg id="runBtnIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </button>
+        </div>
+        <div class="presets-container">
+          <span class="preset-label">Preset Topics:</span>
+          <button class="chip" onclick="setTopic('impact of remote work on urban housing prices')">🏠 Remote Work Housing</button>
+          <button class="chip" onclick="setTopic('quantum computing applications in drug discovery')">🔬 Quantum Drug Discovery</button>
+          <button class="chip" onclick="setTopic('economics of grid-scale battery energy storage')">⚡ Energy Storage Economics</button>
+        </div>
+      </section>
+
+      <!-- Multi-Agent Visual Workflow Pipeline -->
+      <section class="pipeline-section glass-panel">
+        <div class="section-header">
+          <h3>Multi-Agent Workflow State</h3>
+          <div class="pipeline-status-text" id="pipelineStatusText">Ready for research</div>
+        </div>
+
+        <div class="agents-grid">
+          <!-- Researcher Card -->
+          <div class="agent-card" id="agentCardResearcher">
+            <div class="agent-card-header">
+              <div class="agent-avatar researcher-bg">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+              <span class="agent-badge" id="badgeResearcher">Idle</span>
+            </div>
+            <h4 class="agent-title">Agent 1: Researcher</h4>
+            <p class="agent-desc">Decomposes topic into 3–5 sub-questions, queries ChromaDB vector store, synthesizes grounded notes.</p>
+            <div class="agent-metric" id="metricResearcher">0 Notes</div>
+          </div>
+
+          <!-- Connecting Arrow -->
+          <div class="flow-arrow">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+
+          <!-- Writer Card -->
+          <div class="agent-card" id="agentCardWriter">
+            <div class="agent-card-header">
+              <div class="agent-avatar writer-bg">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              </div>
+              <span class="agent-badge" id="badgeWriter">Idle</span>
+            </div>
+            <h4 class="agent-title">Agent 2: Writer</h4>
+            <p class="agent-desc">Turns grounded notes into Markdown report draft with inline numerical citations [1], [2].</p>
+            <div class="agent-metric" id="metricWriter">Draft v0</div>
+          </div>
+
+          <!-- Revision Loop Indicator / Arrow -->
+          <div class="flow-arrow revision-flow">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            <span class="loop-tag" id="revisionCountTag">Max 2 Revisions</span>
+          </div>
+
+          <!-- Editor Card -->
+          <div class="agent-card" id="agentCardEditor">
+            <div class="agent-card-header">
+              <div class="agent-avatar editor-bg">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+              </div>
+              <span class="agent-badge" id="badgeEditor">Idle</span>
+            </div>
+            <h4 class="agent-title">Agent 3: Editor</h4>
+            <p class="agent-desc">Audits factual grounding & structure. Approves report or triggers surgical writer revision loops.</p>
+            <div class="agent-metric" id="metricEditor">Pending</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Output Tabs Area -->
+      <section class="results-section glass-panel">
+        <div class="tabs-header">
+          <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('tabSteps')">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              Detailed Agent Steps
+            </button>
+            <button class="tab-btn" onclick="switchTab('tabReport')">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Final Research Report
+            </button>
+            <button class="tab-btn" onclick="switchTab('tabNotes')">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+              Grounded Research Notes
+            </button>
+            <button class="tab-btn" onclick="switchTab('tabLog')">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 14 15 20 9"/><polyline points="14 9 20 9 20 15"/></svg>
+              Execution State Log
+            </button>
+          </div>
+          <div class="tab-actions">
+            <button class="btn btn-small" onclick="copyReport()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy Markdown
+            </button>
+            <button class="btn btn-small" onclick="downloadReport()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+              Download Report
+            </button>
+          </div>
+        </div>
+
+        <!-- Tab 0: Detailed Agent Steps Timeline -->
+        <div id="tabSteps" class="tab-content active">
+          <div id="stepsTimelineContainer" class="steps-timeline">
+            <div class="placeholder-box">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+              <p>Click <strong>Run Research Pipeline</strong> to inspect the detailed step-by-step actions taken by the Researcher, Writer, and Editor agents.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 1: Rendered Report -->
+        <div id="tabReport" class="tab-content">
+          <div id="reportContainer" class="markdown-preview">
+            <div class="placeholder-box">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              <p>No report generated yet. Enter a topic above and click <strong>Run Research Pipeline</strong>.</p>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- Tab 2: Grounded Notes -->
+        <div id="tabNotes" class="tab-content">
+          <div id="notesContainer" class="notes-grid">
+            <p class="placeholder-text">Run the pipeline to inspect synthesized research notes and vector citations.</p>
+          </div>
+        </div>
+
+        <!-- Tab 3: Execution Log -->
+        <div id="tabLog" class="tab-content">
+          <div class="terminal-log" id="logContainer">
+            <div class="log-line text-muted">[00:00:00] System ready. Awaiting research request...</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Ingestion Drawer Modal -->
+    <div class="modal-overlay" id="ingestDrawer">
+      <div class="modal-card glass-panel">
+        <div class="modal-header">
+          <h3>Ingest Knowledge Sources</h3>
+          <button class="close-btn" onclick="toggleIngestDrawer()">&times;</button>
+        </div>
+        <div class="modal-body">
+
+          <!-- Upload External File Section -->
+          <div class="upload-section" style="margin-bottom: 24px; padding: 18px; border: 2px dashed rgba(16, 185, 129, 0.4); border-radius: 12px; background: rgba(16, 185, 129, 0.05); text-align: center;">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color: var(--accent-emerald); margin-bottom: 8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+            <h4 style="font-size: 0.95rem; font-family: var(--font-heading); margin-bottom: 4px;">Upload Document (.pdf, .txt, .md)</h4>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">Files will be automatically parsed, chunked, and embedded into ChromaDB.</p>
+            <input type="file" id="fileInput" accept=".pdf,.txt,.md" style="display: none;" onchange="uploadSelectedFile()">
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">Select & Upload File</button>
+            <div id="uploadStatusText" style="font-size: 0.8rem; color: var(--accent-emerald); margin-top: 8px;"></div>
+          </div>
+
+          <div style="text-align: center; margin: 16px 0; color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;">— OR Paste Raw Text —</div>
+
+          <div class="form-group">
+            <label>Document Title</label>
+            <input type="text" id="ingestTitle" class="form-control" placeholder="e.g. 2025 Assam Floods Relief & Economic Impact Report">
+          </div>
+          <div class="form-group">
+            <label>Source URL / Reference (Optional)</label>
+            <input type="text" id="ingestUrl" class="form-control" placeholder="e.g. https://www.assam-disaster-mgmt.gov.in/report-2025">
+          </div>
+          <div class="form-group">
+            <label>Document Text Content</label>
+            <textarea id="ingestContent" class="form-control" rows="6" placeholder="Paste source text here..."></textarea>
+          </div>
+
+          <!-- Existing Ingested Documents List -->
+          <div style="margin-top: 20px;">
+            <h5 style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;">Indexed Files in ./docs:</h5>
+            <div id="docsListContainer" style="max-height: 120px; overflow-y: auto; font-size: 0.8rem; font-family: var(--font-mono); color: #d1d5db; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px;">
+              Loading documents...
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="toggleIngestDrawer()">Close</button>
+          <button class="btn btn-primary" onclick="submitIngest()">Ingest Text Document</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
