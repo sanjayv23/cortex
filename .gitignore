@@ -27,6 +27,7 @@ logs/
 *.json
 !requirements.txt
 !package.json
+!railway.json
 
 # IDE & System
 .vscode/
