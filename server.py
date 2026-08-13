@@ -316,5 +316,6 @@ def read_root():
     return FileResponse(os.path.join(static_dir, "index.html"))
 
 if __name__ == "__main__":
-    print("🚀 Starting Multi-Agent Research Server on http://localhost:8050")
-    uvicorn.run(app, host="127.0.0.1", port=8050)
+    port = int(os.environ.get("PORT", 8050))
+    print(f"🚀 Starting Multi-Agent Research Server on http://0.0.0.0:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
