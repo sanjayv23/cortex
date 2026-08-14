@@ -98,7 +98,7 @@ def call_llm_json(
                     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
                     if not api_key or api_key in ["your_gemini_api_key_here", "your_google_api_key_here"]:
                         raise ValueError("GEMINI_API_KEY / GOOGLE_API_KEY is not configured in .env.")
-                    target_model = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+                    target_model = model_name or os.getenv("GEMINI_MODEL", "gemini-flash-latest")
                     print(f"🤖 [LLM] Calling Gemini API (Model: {target_model})...")
                     raw_text = _raw_gemini_call(api_key, system_prompt, augmented_user_prompt, target_model)
                 else:
