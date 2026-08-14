@@ -2,6 +2,8 @@ import os
 import sys
 import time
 import json
+import uuid
+import threading
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +31,13 @@ class IngestRequest(BaseModel):
     content: str
     url: Optional[str] = "N/A"
 
+# In-memory research job store. The pipeline can take minutes (multiple
+# sequential LLM calls per revision loop), which exceeds most reverse-proxy
+# gateway timeouts if run synchronously inside one HTTP request. Jobs run in
+# a background thread instead; the frontend polls /api/research/{job_id}.
+RESEARCH_JOBS: Dict[str, Dict[str, Any]] = {}
+RESEARCH_JOBS_LOCK = threading.Lock()
+
 @app.get("/api/status")
 def get_status():
     """Get system health and vector DB document count."""
@@ -43,19 +52,12 @@ def get_status():
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
-@app.post("/api/research")
-def run_research_endpoint(req: ResearchRequest):
-    """Trigger the 3-agent research pipeline for a topic and return detailed agent step breakdowns."""
-    topic = req.topic.strip()
-    if not topic:
-        raise HTTPException(status_code=400, detail="Topic cannot be empty.")
-
+def _run_research_job(job_id: str, topic: str):
+    """Execute the full agent pipeline in a background thread and record progress/result in RESEARCH_JOBS."""
     logger = RunLogger(topic=topic)
     initial_state = create_initial_state(topic)
     logger.log_step("init", "initialized", {"initial_state": initial_state})
 
-    steps_log = []
-    detailed_steps = []
     final_state = initial_state
 
     try:
@@ -64,11 +66,13 @@ def run_research_endpoint(req: ResearchRequest):
                 for k, v in state_update.items():
                     final_state[k] = v
 
+                detailed_step = None
+
                 # Build rich detailed step info based on agent node
                 if node_name == "researcher":
                     notes = final_state.get("research_notes", [])
                     sub_q_set = list(dict.fromkeys([n.get("sub_question") for n in notes if n.get("sub_question")]))
-                    detailed_steps.append({
+                    detailed_step = {
                         "agent": "Researcher",
                         "phase": "Topic Decomposition & Vector Retrieval",
                         "title": "Agent 1 — Grounded Research Synthesis",
@@ -79,15 +83,15 @@ def run_research_endpoint(req: ResearchRequest):
                         "sources_used": list(set([n.get("source") for n in notes if n.get("source")])),
                         "status": "completed",
                         "summary": f"Decomposed topic into {len(sub_q_set)} sub-questions. Retrieved and synthesized {len(notes)} grounded research notes from ChromaDB."
-                    })
+                    }
 
                 elif node_name == "writer":
                     draft = state_update.get("draft", final_state.get("draft", ""))
                     v_num = final_state.get("draft_version", 1)
                     rev_c = final_state.get("revision_count", 0)
                     editor_fb = final_state.get("editor_feedback", "")
-                    
-                    detailed_steps.append({
+
+                    detailed_step = {
                         "agent": "Writer",
                         "phase": f"Drafting Report v{v_num}",
                         "title": f"Agent 2 — Technical Report Composition (v{v_num})",
@@ -98,9 +102,9 @@ def run_research_endpoint(req: ResearchRequest):
                         "char_count": len(draft),
                         "draft_snippet": draft[:350] + "..." if len(draft) > 350 else draft,
                         "status": "completed",
-                        "summary": f"Generated Markdown draft v{v_num} ({len(draft)} chars) with inline numerical citations." + 
+                        "summary": f"Generated Markdown draft v{v_num} ({len(draft)} chars) with inline numerical citations." +
                                    (f" Addressed editor feedback surgically." if rev_c > 0 else "")
-                    })
+                    }
 
                 elif node_name == "editor":
                     rev_c = final_state.get("revision_count", 0)
@@ -108,7 +112,7 @@ def run_research_endpoint(req: ResearchRequest):
                     st = state_update.get("status", "done")
                     is_approved = (st == "done") and ("Known Limitations" not in final_state.get("final_report", ""))
 
-                    detailed_steps.append({
+                    detailed_step = {
                         "agent": "Editor",
                         "phase": "Quality Audit & Citation Verification",
                         "title": f"Agent 3 — Rigorous Quality Audit Pass (Loop {rev_c})",
@@ -124,7 +128,7 @@ def run_research_endpoint(req: ResearchRequest):
                         ],
                         "status": "approved" if is_approved else "revision_requested",
                         "summary": "APPROVED draft! Ready for publication." if is_approved else f"Requested revision pass {rev_c}/2. Feedback: {fb}"
-                    })
+                    }
 
                 step_info = {
                     "node": node_name,
@@ -135,8 +139,18 @@ def run_research_endpoint(req: ResearchRequest):
                     "notes_count": len(final_state.get("research_notes", [])),
                     "timestamp": time.strftime("%H:%M:%S")
                 }
-                steps_log.append(step_info)
                 logger.log_step(node_name, step_info["status"], step_info)
+
+                with RESEARCH_JOBS_LOCK:
+                    job = RESEARCH_JOBS[job_id]
+                    job["status"] = "running"
+                    job["steps_log"].append(step_info)
+                    if detailed_step:
+                        job["detailed_steps"].append(detailed_step)
+                    job["draft_version"] = final_state.get("draft_version", 0)
+                    job["revision_count"] = final_state.get("revision_count", 0)
+                    job["research_notes"] = final_state.get("research_notes", [])
+                    job["editor_feedback"] = final_state.get("editor_feedback", "")
 
         final_report = final_state.get("final_report", final_state.get("draft", "No report generated."))
         logger.finalize(final_report)
@@ -149,22 +163,54 @@ def run_research_endpoint(req: ResearchRequest):
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(final_report)
 
-        return {
-            "success": True,
-            "topic": topic,
-            "final_report": final_report,
-            "draft_version": final_state.get("draft_version", 1),
-            "revision_count": final_state.get("revision_count", 0),
-            "research_notes": final_state.get("research_notes", []),
-            "editor_feedback": final_state.get("editor_feedback", ""),
-            "detailed_steps": detailed_steps,
-            "steps_log": steps_log,
-            "saved_filename": filename,
-            "log_file": logger.log_filename
-        }
+        with RESEARCH_JOBS_LOCK:
+            job = RESEARCH_JOBS[job_id]
+            job["status"] = "done"
+            job["final_report"] = final_report
+            job["saved_filename"] = filename
+            job["log_file"] = logger.log_filename
+
     except Exception as e:
         print(f"❌ Pipeline execution error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        with RESEARCH_JOBS_LOCK:
+            RESEARCH_JOBS[job_id]["status"] = "error"
+            RESEARCH_JOBS[job_id]["error"] = str(e)
+
+@app.post("/api/research")
+def start_research_endpoint(req: ResearchRequest):
+    """Kick off the 3-agent research pipeline in the background and return a job_id to poll."""
+    topic = req.topic.strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="Topic cannot be empty.")
+
+    job_id = str(uuid.uuid4())
+    with RESEARCH_JOBS_LOCK:
+        RESEARCH_JOBS[job_id] = {
+            "status": "queued",
+            "topic": topic,
+            "detailed_steps": [],
+            "steps_log": [],
+            "research_notes": [],
+            "draft_version": 0,
+            "revision_count": 0,
+            "editor_feedback": "",
+            "final_report": "",
+            "error": None,
+        }
+
+    thread = threading.Thread(target=_run_research_job, args=(job_id, topic), daemon=True)
+    thread.start()
+
+    return {"job_id": job_id, "status": "queued"}
+
+@app.get("/api/research/{job_id}")
+def get_research_job_endpoint(job_id: str):
+    """Poll the status/result of a background research job."""
+    with RESEARCH_JOBS_LOCK:
+        job = RESEARCH_JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found.")
+        return dict(job)
 
 
 @app.post("/api/ingest")

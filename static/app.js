@@ -105,34 +105,21 @@ async function runPipeline() {
   appendLog("text-info", `[PIPELINE START] Topic: "${topic}"`);
 
   try {
-    const res = await fetch("/api/research", {
+    const startRes = await fetch("/api/research", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ topic })
     });
 
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Pipeline execution failed.");
+    if (!startRes.ok) {
+      const err = await startRes.json();
+      throw new Error(err.detail || "Failed to start pipeline.");
     }
 
-    const data = await res.json();
+    const { job_id } = await startRes.json();
+    const data = await pollResearchJob(job_id);
+
     currentReportMarkdown = data.final_report;
-
-    // Simulate node transition animation
-    setAgentDone("Researcher", `${data.research_notes.length} Grounded Notes`);
-    appendLog("text-success", `[RESEARCHER DONE] Synthesized ${data.research_notes.length} grounded notes with source citations.`);
-
-    setAgentActive("Writer", `Drafting v${data.draft_version}...`);
-    updatePipelineStatus("Step 2/3: Writer agent composing technical draft report...");
-    await sleep(600);
-
-    setAgentDone("Writer", `Draft v${data.draft_version}`);
-    appendLog("text-success", `[WRITER DONE] Draft v${data.draft_version} generated with inline citations.`);
-
-    setAgentActive("Editor", "Auditing Factual Claims & Citations...");
-    updatePipelineStatus("Step 3/3: Editor auditing grounding and clarity...");
-    await sleep(600);
 
     if (data.revision_count > 0) {
       document.getElementById("revisionCountTag").innerText = `Revisions: ${data.revision_count}/2`;
@@ -158,6 +145,52 @@ async function runPipeline() {
   } finally {
     runBtn.disabled = false;
     runBtnText.innerText = "Run Research Pipeline";
+  }
+}
+
+// Polls a background research job until it completes or errors. Running the
+// pipeline as one long synchronous request used to trip reverse-proxy gateway
+// timeouts (several minutes across multiple LLM calls/revision passes), so the
+// backend now runs it in a background thread and this polls for progress.
+async function pollResearchJob(jobId) {
+  let lastStepCount = 0;
+  const POLL_INTERVAL_MS = 2000;
+
+  while (true) {
+    const res = await fetch(`/api/research/${jobId}`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to fetch job status.");
+    }
+    const job = await res.json();
+
+    if (job.detailed_steps && job.detailed_steps.length > lastStepCount) {
+      renderDetailedSteps(job.detailed_steps);
+      const newSteps = job.detailed_steps.slice(lastStepCount);
+      lastStepCount = job.detailed_steps.length;
+
+      newSteps.forEach(step => {
+        if (step.agent === "Researcher") {
+          setAgentDone("Researcher", `${job.research_notes.length} Grounded Notes`);
+          appendLog("text-success", `[RESEARCHER DONE] Synthesized ${job.research_notes.length} grounded notes with source citations.`);
+          setAgentActive("Writer", `Drafting v${job.draft_version}...`);
+          updatePipelineStatus("Step 2/3: Writer agent composing technical draft report...");
+        } else if (step.agent === "Writer") {
+          setAgentDone("Writer", `Draft v${job.draft_version}`);
+          appendLog("text-success", `[WRITER DONE] Draft v${job.draft_version} generated with inline citations.`);
+          setAgentActive("Editor", "Auditing Factual Claims & Citations...");
+          updatePipelineStatus("Step 3/3: Editor auditing grounding and clarity...");
+        } else if (step.agent === "Editor" && job.status !== "done") {
+          setAgentActive("Writer", `Revision pass ${job.revision_count}/2...`);
+          updatePipelineStatus(`Editor requested revision ${job.revision_count}/2 — writer revising...`);
+        }
+      });
+    }
+
+    if (job.status === "done") return job;
+    if (job.status === "error") throw new Error(job.error || "Pipeline execution failed.");
+
+    await sleep(POLL_INTERVAL_MS);
   }
 }
 
